@@ -1,0 +1,83 @@
+# Cloud Build CI/CD pipeline for SIT707 HD task.
+#
+# Pipeline stages:
+#   1. Install Python deps inside a python image
+#   2. Run pytest — pipeline halts here if any test fails
+#   3. Build the container image
+#   4. Push it to Artifact Registry
+#   5. Deploy to Cloud Run
+#
+# Substitution variables (override at trigger config or via --substitutions):
+#   _REGION              GCP region for Artifact Registry + Cloud Run (default us-central1)
+#   _REPO                Artifact Registry repository name        (default sit707-repo)
+#   _SERVICE             Cloud Run service name                   (default sit707-calculator)
+#
+# The image tag uses $SHORT_SHA so every commit produces a uniquely tagged image.
+
+steps:
+  # ---- Stage 1: install deps ------------------------------------------------
+  - id: 'install-deps'
+    name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install --no-cache-dir -r requirements.txt
+
+  # ---- Stage 2: run tests (this stage will fail on the broken commit) -------
+  - id: 'run-tests'
+    name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install --no-cache-dir -r requirements.txt
+        pytest -v --tb=short
+
+  # ---- Stage 3: build image -------------------------------------------------
+  - id: 'build-image'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest'
+      - '.'
+
+  # ---- Stage 4: push image --------------------------------------------------
+  - id: 'push-image'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}'
+
+  # ---- Stage 5: deploy to Cloud Run -----------------------------------------
+  - id: 'deploy-cloud-run'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--port=8080'
+
+# Default substitutions — override at trigger creation if needed.
+substitutions:
+  _REGION: 'us-central1'
+  _REPO: 'sit707-repo'
+  _SERVICE: 'sit707-calculator'
+
+# Stream logs to Cloud Logging only (not Cloud Storage). Cheaper.
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+# Tag this image set in build history.
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest'
