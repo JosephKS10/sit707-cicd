@@ -31,8 +31,8 @@ def multiply(a: float, b: float) -> float:
 
 
 def divide(a: float, b: float) -> float:
-    # BUG: no guard for b == 0. Python will raise ZeroDivisionError.
-    # The unit test expects a controlled ValueError with a clear message.
+    if b == 0:
+        raise ValueError("Cannot divide by zero")
     return a / b
 
 
